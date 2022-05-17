@@ -1,3 +1,5 @@
+use std::cell::Cell;
+
 use egui_glium::EguiGlium;
 use glium::{
     backend::Facade,
@@ -11,25 +13,23 @@ pub fn run(
     display: Display,
     event_loop: glutin::event_loop::EventLoop<()>,
 ) {
+    let draw_gui = Cell::new(true);
     let mut egui_glium = egui_glium::EguiGlium::new(&display);
-    let mut redraw =
-        move |display: &Display, egui_glium: &mut EguiGlium, control_flow: &mut ControlFlow| {
-            let needs_repaint = egui_glium.run(&display, &mut gui_paint);
+    let mut redraw = move |display: &Display,
+                           egui_glium: &mut EguiGlium,
+                           _control_flow: &mut ControlFlow,
+                           draw_gui: bool| {
+        egui_glium.run(&display, &mut gui_paint);
 
-            *control_flow = if needs_repaint {
-                display.gl_window().window().request_redraw();
-                glutin::event_loop::ControlFlow::Poll
-            } else {
-                glutin::event_loop::ControlFlow::Wait
-            };
-
-            {
-                let mut target = display.draw();
-                draw_clos(&mut target, display);
+        {
+            let mut target = display.draw();
+            draw_clos(&mut target, display);
+            if draw_gui {
                 egui_glium.paint(&display, &mut target);
-                target.finish().unwrap();
             }
-        };
+            target.finish().unwrap();
+        }
+    };
 
     event_loop.run(move |event, _, control_flow| {
         match event {
@@ -37,14 +37,28 @@ pub fn run(
             // See: https://github.com/rust-windowing/winit/issues/987
             // See: https://github.com/rust-windowing/winit/issues/1619
             glutin::event::Event::RedrawEventsCleared if cfg!(windows) => {
-                redraw(&display, &mut egui_glium, control_flow)
+                redraw(&display, &mut egui_glium, control_flow, draw_gui.get())
             }
             glutin::event::Event::RedrawRequested(_) if !cfg!(windows) => {
-                redraw(&display, &mut egui_glium, control_flow)
+                redraw(&display, &mut egui_glium, control_flow, draw_gui.get())
             }
 
             glutin::event::Event::WindowEvent { event, .. } => {
                 use glutin::event::WindowEvent;
+                match event {
+                    WindowEvent::KeyboardInput {
+                        input:
+                            glutin::event::KeyboardInput {
+                                virtual_keycode: Some(glutin::event::VirtualKeyCode::G),
+                                state: glutin::event::ElementState::Pressed,
+                                ..
+                            },
+                        ..
+                    } => {
+                        draw_gui.set(!draw_gui.get());
+                    }
+                    _ => (),
+                }
                 if matches!(event, WindowEvent::CloseRequested | WindowEvent::Destroyed) {
                     *control_flow = glutin::event_loop::ControlFlow::Exit;
                 }

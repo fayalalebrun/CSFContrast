@@ -41,7 +41,9 @@ fn create_display(event_loop: &glutin::event_loop::EventLoop<()>) -> glium::Disp
 
     let context_builder = glutin::ContextBuilder::new()
         .with_srgb(true)
-        .with_vsync(true);
+        .with_vsync(true)
+        .with_gl_profile(glutin::GlProfile::Core)
+        .with_gl(glutin::GlRequest::Latest);
 
     glium::Display::new(window_builder, context_builder, event_loop).unwrap()
 }

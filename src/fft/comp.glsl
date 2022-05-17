@@ -1,7 +1,9 @@
+/// Adapted from https://github.com/bane9/OpenGLFFT/blob/main/OpenGLFFT/FFT2D.comp
+
 #version 430 core
 
 #define WORKGROUP_SIZE_X 256
-#define SHARED_BUFFER_SIZE 1024
+#define SHARED_BUFFER_SIZE 4096
 
 #define PI 3.14159265358979323846264338327950288
 
@@ -13,7 +15,7 @@ layout (binding = 0, rgba32f) uniform image2D inputImage;
 layout (binding = 1, rgba32f) uniform image2D realPart;
 layout (binding = 2, rgba32f) uniform image2D imagPart;
 
-layout(std140, binding = 3) buffer img_info {
+layout(std430, binding = 3) readonly buffer img_info {
 	int input_width;
 	int input_height;
 	int output_width;
@@ -23,9 +25,10 @@ layout(std140, binding = 3) buffer img_info {
 	int clz_width;
 	int clz_height;
 	int no_of_channels;
-} img;
+};
 
-layout(binding = 4) float stage;
+uniform uint stage;
+
 
 shared float real_cache[SHARED_BUFFER_SIZE];
 shared float imag_cache[SHARED_BUFFER_SIZE];
@@ -113,7 +116,7 @@ void load_stage0(int btid, int g_offset, int scanline)
 {
 	for(int i = btid * 2; i < btid * 2 + g_offset * 2; i++)
     {
-        int j = int(rev_bits(i) >> img.clz_width);
+        int j = int(rev_bits(i) >> clz_width);
         
 		pixel_buffer_real[i - btid * 2] = imageLoad(inputImage, ivec2(j, scanline));
 
@@ -137,7 +140,7 @@ void load_stage1_2(int btid, int g_offset, int scanline)
 {
 	for(int i = btid * 2; i < btid * 2 + g_offset * 2; i++)
     {
-        int j = int(rev_bits(i) >> img.clz_height);
+        int j = int(rev_bits(i) >> clz_height);
 
 		pixel_buffer_real[i - btid * 2] = imageLoad(realPart, ivec2(scanline, j));
 
@@ -165,7 +168,7 @@ void load_stage3(int btid, int g_offset, int scanline)
 {
 	for(int i = btid * 2; i < btid * 2 + g_offset * 2; i++)
     {
-        int j = int(rev_bits(i) >> img.clz_width);
+        int j = int(rev_bits(i) >> clz_width);
 
 		pixel_buffer_real[i - btid * 2] = imageLoad(realPart, ivec2(j, scanline));
 
@@ -177,7 +180,7 @@ void store_stage3(int btid, int g_offset, int scanline, float N)
 {
 	for(int i = btid * 2; i < btid * 2 + g_offset * 2; i++)
     {        
-		if(i >= img.input_width) return;
+		if(i >= input_width) return;
 
 		vec4 col = pixel_buffer_real[i - btid * 2] * N;
 			
@@ -209,19 +212,19 @@ void main()
 	{
 		case 0:
 		{
-			int N = img.output_width;
+			int N = output_width;
 			int g_offset = N / 2 / WORKGROUP_SIZE_X;
 			int btid = int(g_offset * gl_LocalInvocationID.x);
 			
 			load_stage0(btid, g_offset, int(gl_WorkGroupID.x));
 			sync();
 
-			for(int channel = 0; channel < img.no_of_channels; channel++)
+			for(int channel = 0; channel < no_of_channels; channel++)
 			{
 				load_into_cache(btid, g_offset, channel);
 				sync();
 				
-				fft_radix2(img.logtwo_width, btid, g_offset, false, N);
+				fft_radix2(logtwo_width, btid, g_offset, false, N);
 				sync();
 
 				load_from_cache(btid, g_offset, channel);
@@ -236,7 +239,7 @@ void main()
 		case 1:
 		case 2:
 		{
-			int N = img.output_height;
+			int N = output_height;
 			int g_offset = N / 2 / WORKGROUP_SIZE_X;
 			int btid = int(g_offset * gl_LocalInvocationID.x);
 			float divisor = (stage == 2) ? 1.0 / float(N) : 1.0;
@@ -245,12 +248,12 @@ void main()
 			load_stage1_2(btid, g_offset, int(gl_WorkGroupID.x));
 			sync();
 			
-			for(int channel = 0; channel < img.no_of_channels; channel++)
+			for(int channel = 0; channel < no_of_channels; channel++)
 			{
 				load_into_cache(btid, g_offset, channel);
 				sync();
 
-				fft_radix2(img.logtwo_height, btid, g_offset, is_inverse, N);
+				fft_radix2(logtwo_height, btid, g_offset, is_inverse, N);
 				sync();
 				
 				load_from_cache(btid, g_offset, channel);
@@ -264,7 +267,7 @@ void main()
 		}
 		case 3:
 		{
-			int N = img.output_width;
+			int N = output_width;
 			int g_offset = N / 2 / WORKGROUP_SIZE_X;
 			int btid = int(g_offset * gl_LocalInvocationID.x);
 			float divisor = 1.0 / float(N);
@@ -272,12 +275,12 @@ void main()
 			load_stage3(btid, g_offset, int(gl_WorkGroupID.x));
 			sync();
 
-			for(int channel = 0; channel < img.no_of_channels; channel++)
+			for(int channel = 0; channel < no_of_channels; channel++)
 			{
 				load_into_cache(btid, g_offset, channel);
 				sync();
 
-				fft_radix2(img.logtwo_width, btid, g_offset, true, N);
+				fft_radix2(logtwo_width, btid, g_offset, true, N);
 				sync();
 			
 				load_from_cache(btid, g_offset, channel);

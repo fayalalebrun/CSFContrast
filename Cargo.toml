@@ -11,3 +11,6 @@ cgmath = "0.18"
 egui = "0.18.0"
 egui_glium = "0.18.0"
 
+[patch.crates-io]
+glium = {git = "https://github.com/glium/glium.git", rev = "cacb970"}
+

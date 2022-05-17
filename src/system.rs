@@ -2,7 +2,7 @@ use cgmath::Vector2;
 use egui::plot::{Line, Plot, VLine, Value, Values};
 use glium::{backend::Facade, Frame, Surface, Texture2d};
 
-use crate::{csf::Csf, grating::Grating, perception_adapter::PerceptionAdapter};
+use crate::{csf::Csf, fft::Fft, grating::Grating, perception_adapter::PerceptionAdapter};
 
 pub struct System {
     grating: Grating,
@@ -12,6 +12,7 @@ pub struct System {
     csf: Csf,
     adapter: PerceptionAdapter,
     adapt: bool,
+    fft: Fft,
 }
 
 impl System {
@@ -30,26 +31,25 @@ impl System {
             },
             adapter: PerceptionAdapter::new(facade),
             adapt: true,
+            fft: Fft::new(facade),
         }
     }
 
     pub fn draw(&mut self, facade: &dyn Facade, surface: &mut Frame) {
-        if self.intermediate.is_none()
-            || self.intermediate.as_ref().unwrap().dimensions() != surface.get_dimensions()
-        {
+        if self.intermediate.is_none() {
             self.intermediate = Some(
                 Texture2d::empty_with_format(
                     facade,
                     glium::texture::UncompressedFloatFormat::U16U16U16U16,
                     glium::texture::MipmapsOption::NoMipmap,
-                    surface.get_dimensions().0,
-                    surface.get_dimensions().1,
+                    1920,
+                    1080,
                 )
                 .unwrap(),
             );
         }
-
-        let mut int_surface = self.intermediate.as_ref().unwrap().as_surface();
+        let intermediate = self.intermediate.as_ref().unwrap();
+        let mut int_surface = intermediate.as_surface();
         self.grating.draw(&mut int_surface);
         if self.adapt {
             self.adapter.draw(
@@ -60,6 +60,14 @@ impl System {
             );
         } else {
             int_surface.fill(surface, glium::uniforms::MagnifySamplerFilter::Nearest);
+
+            let fft_tex = self.fft.process_texture(facade, intermediate);
+            fft_tex.fft(facade);
+            fft_tex.ifft(facade);
+            fft_tex
+                .orig()
+                .as_surface()
+                .fill(surface, glium::uniforms::MagnifySamplerFilter::Nearest);
         }
     }
 

@@ -1,3 +1,5 @@
+use std::rc::Rc;
+
 use glium::{
     backend::Facade,
     implement_uniform_block,
@@ -5,28 +7,43 @@ use glium::{
     texture::InternalFormat,
     uniform,
     uniforms::{self, UniformBuffer},
-    Texture2d,
+    Surface, Texture2d,
 };
 
 pub struct Fft {
-    shader: ComputeShader,
+    shader: Rc<ComputeShader>,
+    texture: Option<FftTexture>,
 }
 
 impl Fft {
     pub fn new(facade: &dyn Facade) -> Self {
         Self {
-            shader: ComputeShader::from_source(facade, include_str!("fft/comp.glsl")).unwrap(),
+            shader: Rc::new(
+                ComputeShader::from_source(facade, include_str!("fft/comp.glsl")).unwrap(),
+            ),
+            texture: None,
         }
     }
     pub fn shader<'a>(&'a self) -> &'a ComputeShader {
         &self.shader
     }
     pub fn process_texture<'a>(
-        &'a self,
+        &'a mut self,
         facade: &dyn Facade,
-        texture: Texture2d,
-    ) -> FftTexture<'a> {
-        FftTexture::new(facade, self, texture)
+        texture: &Texture2d,
+    ) -> &'a FftTexture {
+        if self.texture.is_none()
+            || self.texture.as_ref().unwrap().orig.dimensions() != texture.dimensions()
+        {
+            self.texture = Some(FftTexture::new(facade, self.shader.clone(), &texture));
+        } else {
+            texture.as_surface().fill(
+                &self.texture.as_ref().unwrap().orig.as_surface(),
+                uniforms::MagnifySamplerFilter::Nearest,
+            );
+        }
+
+        self.texture.as_ref().unwrap()
     }
 
     // No idea what this function does.
@@ -39,22 +56,22 @@ impl Fft {
         let x = x + 1;
         let x = x.next_power_of_two();
 
-        return LUT[(x * 0x076be629 >> 27) as usize];
+        return LUT[(x.wrapping_mul(0x076be629) >> 27) as usize];
     }
 }
 
 #[repr(C)]
 #[derive(Clone, Copy)]
 struct ImgInfo {
-    input_width: u32,
-    input_height: u32,
-    output_width: u32,
-    output_height: u32,
-    logtwo_width: u32,
-    logtwo_height: u32,
-    clz_width: u32,
-    clz_height: u32,
-    no_of_channels: u32,
+    input_width: i32,
+    input_height: i32,
+    output_width: i32,
+    output_height: i32,
+    logtwo_width: i32,
+    logtwo_height: i32,
+    clz_width: i32,
+    clz_height: i32,
+    no_of_channels: i32,
 }
 
 implement_uniform_block!(
@@ -70,30 +87,40 @@ implement_uniform_block!(
     no_of_channels,
 );
 
-pub struct FftTexture<'a> {
-    fft: &'a Fft,
+pub struct FftTexture {
+    fft: Rc<ComputeShader>,
     orig: Texture2d,
     real: Texture2d,
     imag: Texture2d,
     img_info: UniformBuffer<ImgInfo>,
 }
 
-impl<'a> FftTexture<'a> {
-    fn new(facade: &dyn Facade, fft: &'a Fft, orig: Texture2d) -> Self {
+impl FftTexture {
+    fn new(facade: &dyn Facade, fft: Rc<ComputeShader>, orig: &Texture2d) -> Self {
         let (width, height) = orig.dimensions();
         let fft_dims = (width.next_power_of_two(), height.next_power_of_two());
         let clz = (Fft::clz(fft_dims.0) + 1, Fft::clz(fft_dims.1) + 1);
         let img_info = ImgInfo {
-            input_width: width,
-            input_height: height,
-            output_width: fft_dims.0,
-            output_height: fft_dims.1,
-            logtwo_width: 32 - clz.0,
-            logtwo_height: 32 - clz.1,
-            clz_width: clz.0,
-            clz_height: clz.1,
-            no_of_channels: format_channels(&orig.get_internal_format().unwrap()),
+            input_width: width as i32,
+            input_height: height as i32,
+            output_width: fft_dims.0 as i32,
+            output_height: fft_dims.1 as i32,
+            logtwo_width: 32 - clz.0 as i32,
+            logtwo_height: 32 - clz.1 as i32,
+            clz_width: clz.0 as i32,
+            clz_height: clz.1 as i32,
+            no_of_channels: format_channels(&orig.get_internal_format().unwrap()) as i32,
         };
+
+        let orig = Texture2d::empty_with_format(
+            facade,
+            glium::texture::UncompressedFloatFormat::F32F32F32F32,
+            glium::texture::MipmapsOption::NoMipmap,
+            width,
+            height,
+        )
+        .unwrap();
+
         let real = Texture2d::empty_with_format(
             facade,
             glium::texture::UncompressedFloatFormat::F32F32F32F32,
@@ -111,7 +138,7 @@ impl<'a> FftTexture<'a> {
         )
         .unwrap();
 
-        let img_info = UniformBuffer::immutable(facade, img_info).unwrap();
+        let img_info = UniformBuffer::new(facade, img_info).unwrap();
 
         Self {
             fft,
@@ -123,22 +150,37 @@ impl<'a> FftTexture<'a> {
     }
 
     fn invoke(&self, stage: u32, work_groups: u32) {
-        self.fft.shader().execute(
-            uniform! {inputImage: self.orig.sampled(), realPart: &self.real, imagePart: &self.imag, img_info: &self.img_info, stage: stage},
+        let input_unit = self
+            .orig()
+            .image_unit(uniforms::ImageUnitFormat::RGBA32F)
+            .unwrap();
+
+        let real_unit = self
+            .real()
+            .image_unit(uniforms::ImageUnitFormat::RGBA32F)
+            .unwrap();
+
+        let imag_unit = self
+            .imag()
+            .image_unit(uniforms::ImageUnitFormat::RGBA32F)
+            .unwrap();
+
+        self.fft.execute(
+            uniform! {inputImage: input_unit, realPart: real_unit, imagPart: imag_unit, img_info: &self.img_info, stage: stage},
             work_groups,
-            0,
-            0,
+            1,
+            1,
         );
     }
 
     pub fn fft(&self, _facade: &dyn Facade) {
-        self.invoke(0, self.img_info.read().unwrap().output_width);
-        self.invoke(1, self.img_info.read().unwrap().output_height);
+        self.invoke(0, self.img_info.read().unwrap().output_width as u32);
+        self.invoke(1, self.img_info.read().unwrap().output_height as u32);
     }
 
     pub fn ifft(&self, _facade: &dyn Facade) {
-        self.invoke(2, self.img_info.read().unwrap().output_height);
-        self.invoke(3, self.img_info.read().unwrap().output_width);
+        self.invoke(2, self.img_info.read().unwrap().output_height as u32);
+        self.invoke(3, self.img_info.read().unwrap().output_width as u32);
     }
 
     pub fn orig<'b>(&'b self) -> &'b Texture2d {
