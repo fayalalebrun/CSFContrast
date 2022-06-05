@@ -24,9 +24,6 @@ impl Fft {
             texture: None,
         }
     }
-    pub fn shader<'a>(&'a self) -> &'a ComputeShader {
-        &self.shader
-    }
     pub fn process_texture<'a>(
         &'a mut self,
         facade: &dyn Facade,

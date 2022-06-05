@@ -3,9 +3,11 @@ use std::{cell::RefCell, rc::Rc};
 use glium::glutin;
 use system::System;
 
+mod color_space;
 mod csf;
 mod fft;
 mod grating;
+mod gstreamer;
 mod gui;
 mod image_shader;
 mod perception_adapter;
@@ -15,7 +17,11 @@ fn main() {
     let event_loop = glutin::event_loop::EventLoop::with_user_event();
     let display = create_display(&event_loop);
 
-    let system = Rc::new(RefCell::new(System::new(&display)));
+    let args: Vec<_> = std::env::args().collect();
+    let default = "".to_string();
+    let uri = args.get(1).unwrap_or(&default);
+
+    let system = Rc::new(RefCell::new(System::new(&display, uri)));
 
     gui::run(
         Box::new({

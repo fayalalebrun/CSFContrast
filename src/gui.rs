@@ -42,6 +42,9 @@ pub fn run(
             glutin::event::Event::RedrawRequested(_) if !cfg!(windows) => {
                 redraw(&display, &mut egui_glium, control_flow, draw_gui.get())
             }
+            glutin::event::Event::MainEventsCleared => {
+                display.gl_window().window().request_redraw();
+            }
 
             glutin::event::Event::WindowEvent { event, .. } => {
                 use glutin::event::WindowEvent;

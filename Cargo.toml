@@ -10,7 +10,22 @@ glium = "0.31"
 cgmath = "0.18"
 egui = "0.18.0"
 egui_glium = "0.18.0"
+image = "0.24"
+
+glib = "0.15"
+gstreamer = "0.18"
+gstreamer-base = "0.18"
+gstreamer-video = "0.18"
+gstreamer-video-sys = "0.18"
+gstreamer-gl = "0.18"
+gstreamer-gl-egl = "0.18"
+gstreamer-gl-wayland = "0.18"
+gstreamer-gl-x11 = "0.18"
+gstreamer-app = { version = "0.18", features = ["v1_10"] }
+gstreamer-pbutils = "0.18"
 
 [patch.crates-io]
 glium = {git = "https://github.com/glium/glium.git", rev = "cacb970"}
 
+[profile.dev.package."*"]
+opt-level = 3
