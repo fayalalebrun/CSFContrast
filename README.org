@@ -1,0 +1,7 @@
+* CSFContrast
+This program adjusts images and videos in real time in order to preserve contrast perception across different distances according to the Contrast Sensitivity Function.
+
+** Usage
+~cargo run -- URI~
+The URI can be any valid URI supported by GStreamer. For example:
+~cargo run https://upload.wikimedia.org/wikipedia/commons/e/ed/The_Old_Organ_%2812Jun09%2C_H128246%2C_copy_B%29.webm~
